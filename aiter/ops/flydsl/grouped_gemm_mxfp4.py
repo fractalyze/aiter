@@ -16,6 +16,20 @@ _SUPPORTED_CLUSTER_M = (1, 2, 4)
 _SUPPORTED_CLUSTER_N = (1, 2, 3, 4)
 
 
+def _base_address_view(t: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    """A rank-1 ``dtype`` view of ``t`` that starts at ``t``'s first element.
+
+    The kernel reads these arguments by base address only; a row pitch, when
+    there is one, arrives as a compile-time argument. Activation scales on the
+    compact path live inside strided wire rows, which ``view(-1)`` rejects and
+    ``reshape`` would copy away from the address the kernel strides through.
+    """
+    t = t.view(dtype)
+    if t.is_contiguous():
+        return t.view(-1)
+    return t.as_strided((t.numel(),), (1,))
+
+
 def _select_bool_env(name: str, csv_value: int) -> int:
     """Select a strict 0/1 environment override or the CSV setting."""
     value = os.environ.get(name)
@@ -277,7 +291,7 @@ def flydsl_grouped_gemm_a8w4_masked(
         out.view(-1),
         ptr_arg(a),
         ptr_arg(w),
-        a_scales.view(torch.int32).view(-1),
+        _base_address_view(a_scales, torch.int32),
         w_scales.view(torch.int32).view(-1),
         contiguous_m,
         stream,
